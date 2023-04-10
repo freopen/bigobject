@@ -1,16 +1,27 @@
 use std::{
     ops::{Deref, DerefMut},
-    sync::Arc, path::Path,
+    path::Path,
+    sync::Arc,
 };
 
 use parking_lot::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 use rocksdb::WriteBatch;
+use serde::de::DeserializeOwned;
 
 use crate::BigObject;
 
 pub struct DBInner {
     lock: RwLock<()>,
     rocksdb: rocksdb::DB,
+}
+
+impl DBInner {
+    pub fn get<T: DeserializeOwned>(&self, key: &[u8]) -> Option<T> {
+        self.rocksdb
+            .get_pinned(key)
+            .unwrap()
+            .map(|encoded| rmp_serde::decode::from_slice::<T>(&encoded).unwrap())
+    }
 }
 
 pub struct DB<T: BigObject> {
@@ -77,14 +88,8 @@ impl<T: BigObject + Default> DB<T> {
     }
     pub fn r(&self) -> RGuard<'_, T> {
         let guard = self.inner.lock.read();
-        let mut root = self
-            .inner
-            .rocksdb
-            .get_pinned([])
-            .unwrap()
-            .map(|root| rmp_serde::decode::from_slice::<T>(&root).unwrap())
-            .unwrap_or_default();
-        root.attach(&self.inner, &[]);
+        let mut root: T = self.inner.get(&[]).unwrap_or_default();
+        root.attach(&self.inner, vec![]);
         RGuard {
             _guard: guard,
             root,
@@ -92,14 +97,8 @@ impl<T: BigObject + Default> DB<T> {
     }
     pub fn rw(&self) -> RWGuard<'_, T> {
         let guard = self.inner.lock.write();
-        let mut root = self
-            .inner
-            .rocksdb
-            .get_pinned([])
-            .unwrap()
-            .map(|root| rmp_serde::decode::from_slice::<T>(&root).unwrap())
-            .unwrap_or_default();
-        root.attach(&self.inner, &[]);
+        let mut root: T = self.inner.get(&[]).unwrap_or_default();
+        root.attach(&self.inner, vec![]);
         RWGuard {
             _guard: guard,
             db: &self.inner,
