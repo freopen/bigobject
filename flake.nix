@@ -16,6 +16,7 @@
         packages = (with pkgs; [
           nil
           nixfmt
+          clang
           (fenix.packages.x86_64-linux.complete.withComponents [
             "cargo"
             "clippy"
