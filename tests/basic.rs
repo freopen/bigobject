@@ -2,9 +2,9 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use tempfile::TempDir;
 
-use bigobject::DB;
+use bigobject::Db;
 
-#[derive(Serialize, Deserialize, Default)]
+#[derive(Serialize, Deserialize, Default, Clone)]
 struct SerdeObj {
     int: i32,
     str: String,
@@ -14,7 +14,7 @@ struct SerdeObj {
 fn serde_root() -> Result<()> {
     let dir = TempDir::new()?;
     {
-        let db: DB<SerdeObj> = DB::open(dir.path());
+        let db: Db<SerdeObj> = Db::open(dir.path());
         {
             let mut db = db.rw();
             assert_eq!(db.int, 0);
@@ -29,7 +29,7 @@ fn serde_root() -> Result<()> {
         }
     }
     {
-        let db: DB<SerdeObj> = DB::open(dir.path());
+        let db: Db<SerdeObj> = Db::open(dir.path());
         let db = db.r();
         assert_eq!(db.int, 2);
         assert_eq!(db.str, "abc".to_string());

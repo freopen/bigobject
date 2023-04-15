@@ -1,14 +1,28 @@
-use rocksdb::WriteBatch;
+use std::any::Any;
+
 use serde::{de::DeserializeOwned, Serialize};
 
-use crate::db::DBInner;
+use crate::storage::{Batch, Prefix};
 
-pub trait BigObject: Serialize + DeserializeOwned {
-    fn attach<'val, 'db: 'val>(&'val mut self, _db: &'db DBInner, _prefix: Vec<u8>) {}
-    fn finalize(&mut self, _batch: &mut WriteBatch) {}
+pub trait Key: Serialize + DeserializeOwned + Ord + Clone + 'static {}
+impl<T: Serialize + DeserializeOwned + Ord + Clone + 'static> Key for T {}
+
+pub trait BigObject: Serialize + DeserializeOwned + Any + InternalClone {
+    fn initialize<F: FnOnce() -> Prefix>(&mut self, prefix: F);
+    fn finalize(&mut self, batch: &mut Batch);
 }
 
-impl<T: Serialize + DeserializeOwned> BigObject for T {
-    default fn attach<'val, 'db: 'val>(&'val mut self, _db: &'db DBInner, _prefix: Vec<u8>) {}
-    default fn finalize(&mut self, _batch: &mut WriteBatch) {}
+impl<T: Serialize + DeserializeOwned + Any + Clone> BigObject for T {
+    default fn initialize<F: FnOnce() -> Prefix>(&mut self, _prefix: F) {}
+    default fn finalize(&mut self, _batch: &mut Batch) {}
+}
+
+pub trait InternalClone {
+    fn internal_clone(&self) -> Self;
+}
+
+impl<T: Clone> InternalClone for T {
+    default fn internal_clone(&self) -> Self {
+        self.clone()
+    }
 }

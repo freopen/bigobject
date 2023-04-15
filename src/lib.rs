@@ -3,8 +3,8 @@
 
 mod bigmap;
 mod bigobject;
-mod db;
+mod storage;
 
 pub use crate::bigmap::BigMap;
 pub use crate::bigobject::BigObject;
-pub use crate::db::DB;
+pub use crate::storage::Db;

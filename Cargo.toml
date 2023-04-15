@@ -7,6 +7,7 @@ edition = "2021"
 
 [dependencies]
 elsa = "1.8.1"
+moka = "0.10.2"
 parking_lot = "0.12.1"
 rmp-serde = "1.1.1"
 rocksdb = "0.20.1"

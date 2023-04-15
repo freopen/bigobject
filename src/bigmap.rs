@@ -1,45 +1,107 @@
-use std::ops::Index;
+use std::{
+    any::Any,
+    collections::BTreeMap,
+    mem::take,
+    ops::{Index, IndexMut},
+};
 
-use elsa::FrozenBTreeMap;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
-use crate::{db::DBInner, BigObject};
-
-pub struct BigMapInner<'a, K, V> {
-    db: &'a DBInner,
-    prefix: Vec<u8>,
-    cache: FrozenBTreeMap<K, Box<V>>,
-}
+use crate::{
+    bigobject::{InternalClone, Key},
+    storage::{Prefix, WithContext},
+    BigObject,
+};
 
 #[derive(Serialize, Deserialize)]
-pub struct BigMap<'a, K, V> {
+pub struct BigMap<K: Key, V: BigObject> {
     #[serde(skip)]
-    inner: Option<BigMapInner<'a, K, V>>,
+    prefix: Prefix,
+    #[serde(skip)]
+    changes: BTreeMap<K, Option<V>>,
 }
 
-impl<'a, K, V> BigObject for BigMap<'a, K, V>
+impl<K: Key, V: BigObject> BigObject for BigMap<K, V>
 where
-    Self: Serialize + DeserializeOwned,
+    Self: Serialize + DeserializeOwned + Any,
 {
-    fn attach<'val, 'db: 'val>(&'val mut self, _db: &'db DBInner, _prefix: Vec<u8>) {}
+    fn initialize<F: FnOnce() -> Prefix>(&mut self, prefix: F) {
+        self.prefix = prefix();
+    }
 
-    fn finalize(&mut self, _batch: &mut rocksdb::WriteBatch) {}
+    fn finalize(&mut self, batch: &mut crate::storage::Batch) {
+        for (key, value) in take(&mut self.changes).into_iter() {
+            if let Some(mut value) = value {
+                value.finalize(batch);
+            } else {
+                batch.delete(&self.prefix.child(&key));
+            }
+        }
+    }
 }
 
-impl<K: Serialize + DeserializeOwned + Ord + Clone, V: BigObject> Index<&K> for BigMap<'_, K, V> {
+impl<K: Key, V: BigObject> WithContext for BigMap<K, V>
+where
+    Self: BigObject,
+{
+    type Key = K;
+    type Value = V;
+}
+
+impl<K: Key, V: BigObject> InternalClone for BigMap<K, V> {
+    fn internal_clone(&self) -> Self {
+        assert!(self.changes.is_empty());
+        Self {
+            prefix: self.prefix.clone(),
+            changes: BTreeMap::new(),
+        }
+    }
+}
+
+impl<K: Key, V: BigObject> Index<&K> for BigMap<K, V>
+where
+    Self: WithContext<Key = K, Value = V>,
+{
     type Output = V;
 
     fn index(&self, key: &K) -> &V {
-        let inner = self.inner.as_ref().unwrap();
-        inner.cache.get(key).unwrap_or_else(|| {
-            let mut child_key = inner.prefix.clone();
-            let separator_index = child_key.len();
-            child_key.push(0);
-            storekey::serialize_into(&mut child_key, key).unwrap();
-            let mut value: V = inner.db.get(&child_key).unwrap();
-            child_key[separator_index] = 1;
-            value.attach(inner.db, child_key);
-            inner.cache.insert(key.clone(), Box::new(value))
-        })
+        self.get(key).unwrap()
+    }
+}
+
+impl<K: Key, V: BigObject> IndexMut<&K> for BigMap<K, V>
+where
+    Self: WithContext<Key = K, Value = V>,
+{
+    fn index_mut(&mut self, key: &K) -> &mut V {
+        self.get_mut(key).unwrap()
+    }
+}
+
+impl<K: Key, V: BigObject> BigMap<K, V>
+where
+    Self: WithContext<Key = K, Value = V>,
+{
+    pub fn get(&self, key: &K) -> Option<&V> {
+        match self.changes.get(key) {
+            Some(value) => value.as_ref(),
+            None => self.get_child(&self.prefix, key),
+        }
+    }
+    pub fn get_mut(&mut self, key: &K) -> Option<&mut V> {
+        if !self.changes.contains_key(key) {
+            self.changes.insert(
+                key.clone(),
+                self.get_child(&self.prefix, key)
+                    .map(|value| value.internal_clone()),
+            );
+        }
+        self.changes.get_mut(key).unwrap().as_mut()
+    }
+    pub fn insert(&mut self, key: K, value: V) {
+        self.changes.insert(key, Some(value));
+    }
+    pub fn remove(&mut self, key: &K) {
+        self.changes.insert(key.clone(), None);
     }
 }
