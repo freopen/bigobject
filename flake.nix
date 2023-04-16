@@ -12,6 +12,8 @@
       pkgs = nixpkgs.legacyPackages.x86_64-linux.extend fenix.overlays.default;
     in {
       devShells.x86_64-linux.default = pkgs.mkShell {
+        src = ./.;
+        __noChroot = true;
         LIBCLANG_PATH = "${pkgs.libclang.lib}/lib";
         RUSTFLAGS = "-Z macro-backtrace";
         packages = (with pkgs; [
@@ -26,6 +28,13 @@
             "rustfmt"
           ])
         ]);
+        buildPhase = ''
+          cp -R $src/* .
+          export CARGO_HOME=$(mktemp -d cargo-home.XXX)
+          cargo test
+          cargo clippy
+          touch $out
+        '';
       };
     };
 }
