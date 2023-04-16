@@ -3,9 +3,11 @@ name = "bigobject"
 version = "0.1.0"
 edition = "2021"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[workspace]
+members = ["bigobject_derive"]
 
 [dependencies]
+bigobject_derive = { version = "0.1.0", path = "bigobject_derive" }
 elsa = "1.8.1"
 moka = "0.10.2"
 parking_lot = "0.12.1"

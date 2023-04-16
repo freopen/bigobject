@@ -5,6 +5,9 @@ mod bigmap;
 mod bigobject;
 mod storage;
 
-pub use crate::bigmap::BigMap;
-pub use crate::bigobject::BigObject;
-pub use crate::storage::Db;
+pub use crate::{bigmap::BigMap, bigobject::BigObject, storage::Db};
+pub use bigobject_derive::BigObject;
+
+pub mod internal {
+    pub use crate::storage::{Batch, Prefix};
+}
