@@ -4,7 +4,7 @@ use moka::sync::Cache;
 use parking_lot::RwLock;
 
 use crate::{
-    storage::guard::{RGuard, RWGuard},
+    storage::guard::{RGuard, WGuard},
     BigObject,
 };
 
@@ -52,7 +52,7 @@ impl<T: BigObject + Default> Db<T> {
     pub fn r(&self) -> RGuard<'_, T> {
         RGuard::new(self)
     }
-    pub fn rw(&self) -> RWGuard<'_, T> {
-        RWGuard::new(self)
+    pub fn w(&self) -> WGuard<'_, T> {
+        WGuard::new(self)
     }
 }

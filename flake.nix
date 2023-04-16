@@ -13,6 +13,7 @@
     in {
       devShells.x86_64-linux.default = pkgs.mkShell {
         LIBCLANG_PATH = "${pkgs.libclang.lib}/lib";
+        RUSTFLAGS = "-Z macro-backtrace";
         packages = (with pkgs; [
           nil
           nixfmt

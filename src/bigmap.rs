@@ -6,7 +6,7 @@ use std::{
     ops::{Index, IndexMut},
 };
 
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde::{de::DeserializeOwned, Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::{
     bigobject::{InternalClone, Key, KeyRef},
@@ -14,17 +14,40 @@ use crate::{
     BigObject,
 };
 
-#[derive(Serialize, Deserialize, Default)]
 pub struct BigMap<K: Key, V: BigObject> {
-    #[serde(skip)]
     prefix: Option<Prefix>,
-    #[serde(skip)]
     changes: BTreeMap<K, Option<V>>,
 }
 
-impl<K: Key, V: BigObject> BigObject for BigMap<K, V>
+impl<K: Key, V: BigObject> Default for BigMap<K, V> {
+    fn default() -> Self {
+        Self {
+            prefix: None,
+            changes: BTreeMap::new(),
+        }
+    }
+}
+
+impl<K: Key, V: BigObject> Serialize for BigMap<K, V> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_unit()
+    }
+}
+
+impl<'a, K: Key, V: BigObject> Deserialize<'a> for BigMap<K, V> {
+    fn deserialize<D: Deserializer<'a>>(_deserializer: D) -> Result<Self, D::Error> {
+        Ok(Self {
+            prefix: None,
+            changes: BTreeMap::new(),
+        })
+    }
+}
+
+impl<K, V> BigObject for BigMap<K, V>
 where
     Self: Serialize + DeserializeOwned + Any,
+    K: Key,
+    V: BigObject,
 {
     fn initialize<F: FnOnce() -> Prefix>(&mut self, prefix: F) {
         self.prefix = Some(prefix());
@@ -48,9 +71,11 @@ where
     }
 }
 
-impl<K: Key, V: BigObject> WithContext for BigMap<K, V>
+impl<K, V> WithContext for BigMap<K, V>
 where
     Self: BigObject,
+    K: Key,
+    V: BigObject,
 {
     type Key = K;
     type Value = V;
@@ -82,9 +107,9 @@ where
 
 impl<K, Q, V> IndexMut<&Q> for BigMap<K, V>
 where
+    Self: WithContext<Key = K, Value = V>,
     K: Borrow<Q> + Key,
     Q: KeyRef + ?Sized + ToOwned<Owned = K>,
-    Self: WithContext<Key = K, Value = V>,
     V: BigObject,
 {
     fn index_mut(&mut self, key: &Q) -> &mut V {

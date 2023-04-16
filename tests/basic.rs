@@ -16,7 +16,7 @@ fn serde_root() -> Result<()> {
     {
         let db: Db<SerdeObj> = Db::open(dir.path());
         {
-            let mut write = db.rw();
+            let mut write = db.w();
             assert_eq!(write.int, 0);
             assert_eq!(write.str, "".to_string());
             write.int = 2;
@@ -47,7 +47,7 @@ fn big_map_root() -> Result<()> {
     {
         let db: Db<BigMap<String, SerdeObj>> = Db::open(dir.path());
         {
-            let mut write = db.rw();
+            let mut write = db.w();
             assert_eq!(None, write.get("abc"));
             write.insert("abc".to_string(), test_obj.clone());
             assert_eq!(test_obj, write["abc"]);
@@ -67,7 +67,7 @@ fn big_map_root() -> Result<()> {
             assert_eq!(None, read.get("def"));
             assert_eq!(3, read["abc"].int);
         }
-        db.rw().clear();
+        db.w().clear();
         assert_eq!(None, db.r().get("abc"));
     }
     Ok(())

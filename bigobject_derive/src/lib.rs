@@ -9,19 +9,39 @@ pub fn derive_big_object(input: proc_macro::TokenStream) -> proc_macro::TokenStr
     let (impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
     let initialize = for_each_field(
         &input.data,
-        |index, name| quote! { self.#name.initialize(|| prefix.child(#index)); },
+        |index, name| quote! { self.#name.initialize(|| prefix.child(&#index)); },
     );
     let finalize = for_each_field(
         &input.data,
-        |index, name| quote! { self.#name.finalize(prefix.child(#index), batch); },
+        |index, name| quote! { self.#name.finalize(|| prefix.child(&#index), batch); },
     );
+    let clone = for_each_field(&input.data, |_index, name| {
+        quote! {
+            #name: self.#name.internal_clone(),
+        }
+    });
     let expanded = quote! {
         impl #impl_generics bigobject::BigObject for #name #ty_generics #where_clause {
-            fn initialize<F: FnOnce() -> bigobject::Prefix>(&mut self, prefix: F) {
+            fn initialize<F>(&mut self, prefix: F)
+            where
+                F: FnOnce() -> bigobject::internal::Prefix,
+            {
+                let prefix = prefix();
                 #initialize
             }
-            fn finalize<F: FnOnce() -> bigobject::Prefix>(&mut self, prefix: F, batch: &mut bigobject::Batch) {
+            fn finalize<F>(&mut self, prefix: F, batch: &mut bigobject::internal::Batch)
+            where
+                F: FnOnce() -> bigobject::internal::Prefix,
+            {
+                let prefix = prefix();
                 #finalize
+            }
+        }
+        impl #impl_generics bigobject::internal::InternalClone for #name #ty_generics #where_clause {
+            fn internal_clone(&self) -> #name {
+                Self{
+                    #clone
+                }
             }
         }
     };
@@ -43,7 +63,7 @@ fn for_each_field<F: Fn(usize, TokenStream) -> TokenStream>(
                 quote_spanned!(field.span() => #generated)
             });
             quote! {
-                #(#inits;)*
+                #(#inits)*
             }
         }
         _ => unimplemented!(),

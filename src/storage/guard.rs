@@ -34,20 +34,20 @@ impl<'a, T: BigObject> Deref for RGuard<'a, T> {
     }
 }
 
-pub struct RWGuard<'a, T: BigObject> {
+pub struct WGuard<'a, T: BigObject> {
     guard: Option<RwLockUpgradableReadGuard<'a, DbInner>>,
     context: LockContext,
     root: Option<T>,
 }
 
-impl<'a, T: BigObject> RWGuard<'a, T> {
-    pub(super) fn new(db: &'a Db<T>) -> RWGuard<'a, T> {
+impl<'a, T: BigObject> WGuard<'a, T> {
+    pub(super) fn new(db: &'a Db<T>) -> WGuard<'a, T> {
         let guard = db.inner.upgradable_read();
         let context = LockContext::new(&guard);
         let root = LockContext::get::<T>(&context.root_prefix())
             .unwrap()
             .internal_clone();
-        RWGuard {
+        WGuard {
             guard: Some(guard),
             context,
             root: Some(root),
@@ -55,7 +55,7 @@ impl<'a, T: BigObject> RWGuard<'a, T> {
     }
 }
 
-impl<'a, T: BigObject> Deref for RWGuard<'a, T> {
+impl<'a, T: BigObject> Deref for WGuard<'a, T> {
     type Target = T;
 
     fn deref(&self) -> &T {
@@ -63,13 +63,13 @@ impl<'a, T: BigObject> Deref for RWGuard<'a, T> {
     }
 }
 
-impl<'a, T: BigObject> DerefMut for RWGuard<'a, T> {
+impl<'a, T: BigObject> DerefMut for WGuard<'a, T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         self.root.as_mut().unwrap()
     }
 }
 
-impl<'a, T: BigObject> Drop for RWGuard<'a, T> {
+impl<'a, T: BigObject> Drop for WGuard<'a, T> {
     fn drop(&mut self) {
         if std::thread::panicking() {
             return;
