@@ -10,6 +10,7 @@ jobs:
       - uses: actions/checkout@v3
       - uses: cachix/install-nix-action@v19
         with:
+          extra_nix_config: "sandbox = relaxed"
           github_access_token: ${{ secrets.GITHUB_TOKEN }}
       - run: nix build .#devShells.x86_64-linux.default
       - run: nix flake check
