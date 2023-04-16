@@ -76,8 +76,8 @@ impl<'a, T: BigObject> Drop for RWGuard<'a, T> {
         }
         let mut batch = Batch::new();
         let mut root = self.root.take().unwrap();
-        root.finalize(&mut batch);
-        batch.put(&self.context.root_prefix(), root);
+        root.finalize(|| self.context.root_prefix(), &mut batch);
+        batch.put(self.context.root_prefix(), root);
         let db = RwLockUpgradableReadGuard::upgrade(self.guard.take().unwrap());
         batch.apply(&db);
     }

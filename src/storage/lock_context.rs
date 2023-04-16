@@ -1,9 +1,9 @@
-use std::{any::Any, cell::RefCell, marker::PhantomData, sync::Arc};
+use std::{any::Any, borrow::Borrow, cell::RefCell, marker::PhantomData, sync::Arc};
 
 use elsa::FrozenVec;
 
 use crate::{
-    bigobject::Key,
+    bigobject::{Key, KeyRef},
     storage::db::{CacheEntry, DbInner, SyncWrapper},
     BigObject,
 };
@@ -30,7 +30,7 @@ pub struct Prefix {
 }
 
 impl Prefix {
-    pub fn child<K: Key>(&self, key: &K) -> Self {
+    pub fn child<K: KeyRef>(&self, key: &K) -> Self {
         let mut child = self.clone();
         storekey::serialize_into(&mut child.inner, key).unwrap();
         child
@@ -59,6 +59,19 @@ impl LockContext {
             inner: vec![],
             _phantom: PhantomContext::default(),
         }
+    }
+
+    pub fn last_key() -> Option<Vec<u8>> {
+        LOCK_CONTEXT.with(|context| {
+            context
+                .borrow_mut()
+                .unwrap()
+                .db
+                .rocksdb
+                .iterator(rocksdb::IteratorMode::End)
+                .next()
+                .map(|kv| kv.unwrap().0.into_vec())
+        })
     }
 
     pub fn get<T: BigObject>(prefix: &Prefix) -> Option<&'static T> {
@@ -107,7 +120,10 @@ pub trait WithContext: BigObject {
     type Key: Key;
     type Value: BigObject;
 
-    fn get_child(&self, prefix: &Prefix, key: &Self::Key) -> Option<&Self::Value> {
-        LockContext::get(&prefix.child(key))
+    fn get_child<Q: KeyRef + ?Sized>(&self, prefix: &Prefix, key: &Q) -> Option<&Self::Value>
+    where
+        Self::Key: Borrow<Q>,
+    {
+        LockContext::get(&prefix.child(&key))
     }
 }

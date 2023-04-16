@@ -1,11 +1,9 @@
 use std::sync::Arc;
 
-use rocksdb::IterateBounds;
-
 use crate::{
     storage::{
         db::{CacheEntry, DbInner, SyncWrapper, CACHE_ENTRY_OVERHEAD},
-        lock_context::Prefix,
+        lock_context::{LockContext, Prefix},
     },
     BigObject,
 };
@@ -25,21 +23,41 @@ impl Batch {
         }
     }
 
-    pub fn put<T: BigObject>(&mut self, key: &Prefix, value: T) {
+    pub fn put<T: BigObject>(&mut self, key: Prefix, value: T) {
         let encoded = rmp_serde::to_vec(&value).unwrap();
+        let len = (key.inner.len() + encoded.len() + CACHE_ENTRY_OVERHEAD) as u32;
+        self.rocksdb.put(&key.inner, encoded);
         self.cache_inserts.push((
-            key.inner.clone(),
+            key.inner,
             CacheEntry {
-                len: (key.inner.len() + encoded.len() + CACHE_ENTRY_OVERHEAD) as u32,
+                len,
                 value: Some(Arc::new(SyncWrapper(value))),
             },
         ));
-        self.rocksdb.put(&key.inner, encoded);
     }
-    pub fn delete(&mut self, key: &Prefix) {
-        let (from, to) = rocksdb::PrefixRange(key.inner.clone()).into_bounds();
-        self.rocksdb.delete_range(from.unwrap(), to.unwrap());
-        self.cache_deletes.push(key.inner.clone());
+    pub fn delete(&mut self, prefix: &Prefix) {
+        let prefix = prefix.inner.clone();
+        self.cache_deletes.push(prefix.clone());
+
+        let to = {
+            let ffs = prefix
+                .iter()
+                .rev()
+                .take_while(|&&byte| byte == u8::MAX)
+                .count();
+            let to = &prefix[..(prefix.len() - ffs)];
+            if !to.is_empty() {
+                let mut to = to.to_vec();
+                *to.last_mut().unwrap() += 1;
+                to
+            } else if let Some(mut to) = LockContext::last_key() {
+                to.push(0);
+                to
+            } else {
+                return;
+            }
+        };
+        self.rocksdb.delete_range(prefix, to);
     }
     pub(super) fn apply(self, db: &DbInner) {
         db.rocksdb.write(self.rocksdb).unwrap();
