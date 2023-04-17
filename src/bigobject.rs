@@ -2,7 +2,7 @@ use std::any::Any;
 
 use serde::{de::DeserializeOwned, Serialize};
 
-use crate::storage::{Batch, Prefix};
+use crate::storage::Batch;
 
 pub trait KeyRef: Serialize + Ord {}
 impl<T: Serialize + Ord + ?Sized> KeyRef for T {}
@@ -10,22 +10,16 @@ impl<T: Serialize + Ord + ?Sized> KeyRef for T {}
 pub trait Key: Serialize + DeserializeOwned + Ord + Clone + 'static {}
 impl<T: Serialize + DeserializeOwned + Ord + Clone + 'static> Key for T {}
 
-pub trait BigObject: Serialize + DeserializeOwned + Any + InternalClone {
-    fn initialize<F: FnOnce() -> Prefix>(&mut self, prefix: F);
-    fn finalize<F: FnOnce() -> Prefix>(&mut self, prefix: F, batch: &mut Batch);
+pub trait BigObject: Serialize + DeserializeOwned + Any {
+    fn initialize<F: FnOnce() -> Vec<u8>>(&mut self, prefix: F);
+    fn finalize<F: FnOnce() -> Vec<u8>>(&mut self, prefix: F, batch: &mut Batch);
+    fn big_clone(&self) -> Self;
 }
 
 impl<T: Serialize + DeserializeOwned + Any + Clone> BigObject for T {
-    default fn initialize<F: FnOnce() -> Prefix>(&mut self, _prefix: F) {}
-    default fn finalize<F: FnOnce() -> Prefix>(&mut self, _prefix: F, _batch: &mut Batch) {}
-}
-
-pub trait InternalClone {
-    fn internal_clone(&self) -> Self;
-}
-
-impl<T: Clone> InternalClone for T {
-    default fn internal_clone(&self) -> Self {
+    fn initialize<F: FnOnce() -> Vec<u8>>(&mut self, _prefix: F) {}
+    fn finalize<F: FnOnce() -> Vec<u8>>(&mut self, _prefix: F, _batch: &mut Batch) {}
+    fn big_clone(&self) -> Self {
         self.clone()
     }
 }

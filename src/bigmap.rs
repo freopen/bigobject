@@ -9,14 +9,20 @@ use std::{
 use serde::{de::DeserializeOwned, Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::{
-    bigobject::{InternalClone, Key, KeyRef},
-    storage::{Prefix, WithContext},
-    BigObject,
+    bigobject::{BigObject, Key, KeyRef},
+    storage::{LockContext, PhantomContext},
 };
 
+pub fn child<K: KeyRef>(prefix: &[u8], key: &K) -> Vec<u8> {
+    let mut child = prefix.to_vec();
+    storekey::serialize_into(&mut child, key).unwrap();
+    child
+}
+
 pub struct BigMap<K: Key, V: BigObject> {
-    prefix: Option<Prefix>,
+    prefix: Option<Vec<u8>>,
     changes: BTreeMap<K, Option<V>>,
+    _phantom: PhantomContext,
 }
 
 impl<K: Key, V: BigObject> Default for BigMap<K, V> {
@@ -24,6 +30,7 @@ impl<K: Key, V: BigObject> Default for BigMap<K, V> {
         Self {
             prefix: None,
             changes: BTreeMap::new(),
+            _phantom: Default::default(),
         }
     }
 }
@@ -39,6 +46,7 @@ impl<'a, K: Key, V: BigObject> Deserialize<'a> for BigMap<K, V> {
         Ok(Self {
             prefix: None,
             changes: BTreeMap::new(),
+            _phantom: Default::default(),
         })
     }
 }
@@ -49,44 +57,32 @@ where
     K: Key,
     V: BigObject,
 {
-    fn initialize<F: FnOnce() -> Prefix>(&mut self, prefix: F) {
+    fn initialize<F: FnOnce() -> Vec<u8>>(&mut self, prefix: F) {
         self.prefix = Some(prefix());
     }
 
-    fn finalize<F: FnOnce() -> Prefix>(&mut self, prefix: F, batch: &mut crate::storage::Batch) {
+    fn finalize<F: FnOnce() -> Vec<u8>>(&mut self, prefix: F, batch: &mut crate::storage::Batch) {
         let prefix = self.prefix.get_or_insert_with(|| {
             let prefix = prefix();
-            batch.delete(&prefix);
+            batch.delete(prefix.big_clone());
             prefix
         });
         for (key, value) in take(&mut self.changes).into_iter() {
             if let Some(mut value) = value {
-                let child = prefix.child(&key);
-                value.finalize(|| child.clone(), batch);
+                let child = child(prefix, &key);
+                value.finalize(|| child.big_clone(), batch);
                 batch.put(child, value);
             } else {
-                batch.delete(&prefix.child(&key));
+                batch.delete(child(prefix, &key));
             }
         }
     }
-}
-
-impl<K, V> WithContext for BigMap<K, V>
-where
-    Self: BigObject,
-    K: Key,
-    V: BigObject,
-{
-    type Key = K;
-    type Value = V;
-}
-
-impl<K: Key, V: BigObject> InternalClone for BigMap<K, V> {
-    fn internal_clone(&self) -> Self {
+    fn big_clone(&self) -> Self {
         assert!(self.changes.is_empty());
         Self {
-            prefix: self.prefix.clone(),
+            prefix: self.prefix.big_clone(),
             changes: BTreeMap::new(),
+            _phantom: Default::default(),
         }
     }
 }
@@ -95,7 +91,6 @@ impl<K, Q, V> Index<&Q> for BigMap<K, V>
 where
     K: Borrow<Q> + Key,
     Q: KeyRef + ?Sized,
-    Self: WithContext<Key = K, Value = V>,
     V: BigObject,
 {
     type Output = V;
@@ -107,7 +102,6 @@ where
 
 impl<K, Q, V> IndexMut<&Q> for BigMap<K, V>
 where
-    Self: WithContext<Key = K, Value = V>,
     K: Borrow<Q> + Key,
     Q: KeyRef + ?Sized + ToOwned<Owned = K>,
     V: BigObject,
@@ -117,10 +111,7 @@ where
     }
 }
 
-impl<K: Key, V: BigObject> BigMap<K, V>
-where
-    Self: WithContext<Key = K, Value = V>,
-{
+impl<K: Key, V: BigObject> BigMap<K, V> {
     pub fn get<Q>(&self, key: &Q) -> Option<&V>
     where
         K: Borrow<Q>,
@@ -130,7 +121,7 @@ where
             || {
                 self.prefix
                     .as_ref()
-                    .and_then(|prefix| self.get_child(prefix, key))
+                    .and_then(|prefix| LockContext::get(&child(prefix, &key)))
             },
             |value| value.as_ref(),
         )
@@ -143,10 +134,9 @@ where
         if !self.changes.contains_key(key) {
             self.changes.insert(
                 key.to_owned(),
-                self.prefix.as_ref().and_then(|prefix| {
-                    self.get_child(prefix, key)
-                        .map(|value| value.internal_clone())
-                }),
+                self.prefix
+                    .as_ref()
+                    .and_then(|prefix| LockContext::get(&child(prefix, &key)).map(V::big_clone)),
             );
         }
         self.changes.get_mut(key).unwrap().as_mut()

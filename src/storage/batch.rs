@@ -1,11 +1,11 @@
 use std::sync::Arc;
 
 use crate::{
+    bigobject::BigObject,
     storage::{
         db::{CacheEntry, DbInner, SyncWrapper, CACHE_ENTRY_OVERHEAD},
-        lock_context::{LockContext, Prefix},
+        lock_context::LockContext,
     },
-    BigObject,
 };
 
 pub struct Batch {
@@ -23,22 +23,19 @@ impl Batch {
         }
     }
 
-    pub fn put<T: BigObject>(&mut self, key: Prefix, value: T) {
+    pub fn put<T: BigObject>(&mut self, key: Vec<u8>, value: T) {
         let encoded = rmp_serde::to_vec(&value).unwrap();
-        let len = (key.inner.len() + encoded.len() + CACHE_ENTRY_OVERHEAD) as u32;
-        self.rocksdb.put(&key.inner, encoded);
+        let len = (key.len() + encoded.len() + CACHE_ENTRY_OVERHEAD) as u32;
+        self.rocksdb.put(&key, encoded);
         self.cache_inserts.push((
-            key.inner,
+            key,
             CacheEntry {
                 len,
                 value: Some(Arc::new(SyncWrapper(value))),
             },
         ));
     }
-    pub fn delete(&mut self, prefix: &Prefix) {
-        let prefix = prefix.inner.clone();
-        self.cache_deletes.push(prefix.clone());
-
+    pub fn delete(&mut self, prefix: Vec<u8>) {
         let to = {
             let ffs = prefix
                 .iter()
@@ -57,7 +54,8 @@ impl Batch {
                 return;
             }
         };
-        self.rocksdb.delete_range(prefix, to);
+        self.rocksdb.delete_range(&prefix, &to);
+        self.cache_deletes.push(prefix);
     }
     pub(super) fn apply(self, db: &DbInner) {
         db.rocksdb.write(self.rocksdb).unwrap();

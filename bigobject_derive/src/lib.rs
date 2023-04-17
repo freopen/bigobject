@@ -1,71 +1,57 @@
 use proc_macro2::TokenStream;
-use quote::{quote, quote_spanned};
-use syn::{parse_macro_input, spanned::Spanned, Data, DeriveInput};
+use quote::quote;
+use syn::{parse_macro_input, Data, DeriveInput};
 
 #[proc_macro_derive(BigObject)]
 pub fn derive_big_object(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
     let name = input.ident;
     let (impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
-    let initialize = for_each_field(
-        &input.data,
-        |index, name| quote! { self.#name.initialize(|| prefix.child(&#index)); },
-    );
-    let finalize = for_each_field(
-        &input.data,
-        |index, name| quote! { self.#name.finalize(|| prefix.child(&#index), batch); },
-    );
-    let clone = for_each_field(&input.data, |_index, name| {
-        quote! {
-            #name: self.#name.internal_clone(),
-        }
-    });
+    let field_name: Vec<TokenStream> = match input.data {
+        Data::Struct(ref data) => data
+            .fields
+            .iter()
+            .enumerate()
+            .map(|(index, field)| match &field.ident {
+                Some(name) => quote! { #name },
+                None => quote! { #index },
+            })
+            .collect(),
+        _ => unimplemented!(),
+    };
+    let field_num = field_name.len();
+    assert!(field_num < 255);
+    let field_index: Vec<u8> = (0..(field_num as u8)).collect();
     let expanded = quote! {
-        impl #impl_generics bigobject::BigObject for #name #ty_generics #where_clause {
-            fn initialize<F>(&mut self, prefix: F)
-            where
-                F: FnOnce() -> bigobject::internal::Prefix,
+        impl #impl_generics bigobject::internal::BigObject for #name #ty_generics #where_clause {
+            fn initialize<F: FnOnce() -> Vec<u8>>(&mut self, prefix: F)
             {
-                let prefix = prefix();
-                #initialize
+                let mut prefix = prefix();
+                #(self.#field_name.initialize(|| {
+                    let mut child = Vec::with_capacity(prefix.len() + 1);
+                    child.extend_from_slice(&prefix);
+                    child.push(#field_index);
+                    child
+                });)*
             }
-            fn finalize<F>(&mut self, prefix: F, batch: &mut bigobject::internal::Batch)
-            where
-                F: FnOnce() -> bigobject::internal::Prefix,
-            {
-                let prefix = prefix();
-                #finalize
+            fn finalize<F: FnOnce() -> Vec<u8>>(
+                &mut self, prefix: F, batch: &mut bigobject::internal::Batch
+            ) {
+                let mut prefix = prefix();
+                prefix.push(0);
+                #(self.#field_name.finalize(|| {
+                    let mut child = Vec::with_capacity(prefix.len() + 1);
+                    child.extend_from_slice(&prefix);
+                    child.push(#field_index);
+                    child
+                }, batch);)*
             }
-        }
-        impl #impl_generics bigobject::internal::InternalClone for #name #ty_generics #where_clause {
-            fn internal_clone(&self) -> #name {
-                Self{
-                    #clone
+            fn big_clone(&self) -> Self {
+                Self {
+                    #(#field_name: self.#field_name.big_clone(),)*
                 }
             }
         }
     };
     proc_macro::TokenStream::from(expanded)
-}
-
-fn for_each_field<F: Fn(usize, TokenStream) -> TokenStream>(
-    data: &Data,
-    generator: F,
-) -> TokenStream {
-    match *data {
-        Data::Struct(ref data) => {
-            let inits = data.fields.iter().enumerate().map(|(index, field)| {
-                let name = match &field.ident {
-                    Some(name) => quote! { #name },
-                    None => quote! { #index },
-                };
-                let generated = generator(index, name);
-                quote_spanned!(field.span() => #generated)
-            });
-            quote! {
-                #(#inits)*
-            }
-        }
-        _ => unimplemented!(),
-    }
 }

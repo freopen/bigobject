@@ -12,5 +12,5 @@ jobs:
         with:
           extra_nix_config: "sandbox = relaxed"
           github_access_token: ${{ secrets.GITHUB_TOKEN }}
-      - run: nix build .#devShells.x86_64-linux.default
+      - run: nix build --print-build-logs .#devShells.x86_64-linux.default
       - run: nix flake check

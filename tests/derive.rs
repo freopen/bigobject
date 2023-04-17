@@ -2,7 +2,7 @@ use anyhow::Result;
 use bigobject::{BigMap, BigObject, Db};
 use serde::{Deserialize, Serialize};
 
-#[derive(Serialize, Deserialize, Default, BigObject)]
+#[derive(Default, BigObject, Serialize, Deserialize)]
 struct Data {
     int: i32,
     string: String,

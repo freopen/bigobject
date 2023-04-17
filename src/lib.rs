@@ -5,12 +5,9 @@ mod bigmap;
 mod bigobject;
 mod storage;
 
-pub use crate::{bigmap::BigMap, bigobject::BigObject, storage::Db};
+pub use crate::{bigmap::BigMap, storage::Db};
 pub use bigobject_derive::BigObject;
 
 pub mod internal {
-    pub use crate::{
-        bigobject::InternalClone,
-        storage::{Batch, Prefix},
-    };
+    pub use crate::{bigobject::BigObject, storage::Batch};
 }

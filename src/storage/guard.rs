@@ -3,8 +3,8 @@ use std::ops::{Deref, DerefMut};
 use parking_lot::{RwLockReadGuard, RwLockUpgradableReadGuard};
 
 use crate::{
+    bigobject::BigObject,
     storage::{db::DbInner, lock_context::LockContext, Batch, Db},
-    BigObject,
 };
 
 pub struct RGuard<'a, T: BigObject> {
@@ -17,7 +17,7 @@ impl<'a, T: BigObject> RGuard<'a, T> {
     pub(super) fn new(db: &'a Db<T>) -> RGuard<'a, T> {
         let guard = db.inner.read();
         let context = LockContext::new(&guard);
-        let root = LockContext::get(&context.root_prefix()).unwrap();
+        let root = LockContext::get(&[]).unwrap();
         RGuard {
             _guard: guard,
             _context: context,
@@ -36,7 +36,7 @@ impl<'a, T: BigObject> Deref for RGuard<'a, T> {
 
 pub struct WGuard<'a, T: BigObject> {
     guard: Option<RwLockUpgradableReadGuard<'a, DbInner>>,
-    context: LockContext,
+    _context: LockContext,
     root: Option<T>,
 }
 
@@ -44,12 +44,10 @@ impl<'a, T: BigObject> WGuard<'a, T> {
     pub(super) fn new(db: &'a Db<T>) -> WGuard<'a, T> {
         let guard = db.inner.upgradable_read();
         let context = LockContext::new(&guard);
-        let root = LockContext::get::<T>(&context.root_prefix())
-            .unwrap()
-            .internal_clone();
+        let root = LockContext::get::<T>(&[]).unwrap().big_clone();
         WGuard {
             guard: Some(guard),
-            context,
+            _context: context,
             root: Some(root),
         }
     }
@@ -76,8 +74,8 @@ impl<'a, T: BigObject> Drop for WGuard<'a, T> {
         }
         let mut batch = Batch::new();
         let mut root = self.root.take().unwrap();
-        root.finalize(|| self.context.root_prefix(), &mut batch);
-        batch.put(self.context.root_prefix(), root);
+        root.finalize(Vec::new, &mut batch);
+        batch.put(vec![], root);
         let db = RwLockUpgradableReadGuard::upgrade(self.guard.take().unwrap());
         batch.apply(&db);
     }

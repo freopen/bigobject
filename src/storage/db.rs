@@ -4,8 +4,8 @@ use moka::sync::Cache;
 use parking_lot::RwLock;
 
 use crate::{
+    bigobject::BigObject,
     storage::guard::{RGuard, WGuard},
-    BigObject,
 };
 
 pub(super) const CACHE_ENTRY_OVERHEAD: usize = 24;
@@ -22,8 +22,8 @@ pub(super) struct CacheEntry {
 }
 
 pub(super) struct DbInner {
-    pub(super) rocksdb: rocksdb::DB,
-    pub(super) cache: Cache<Vec<u8>, CacheEntry>,
+    pub rocksdb: rocksdb::DB,
+    pub cache: Cache<Vec<u8>, CacheEntry>,
 }
 
 pub struct Db<T: BigObject> {
