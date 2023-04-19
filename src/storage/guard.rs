@@ -4,7 +4,11 @@ use parking_lot::{RwLockReadGuard, RwLockUpgradableReadGuard};
 
 use crate::{
     bigobject::BigObject,
-    storage::{db::DbInner, lock_context::LockContext, Batch, Db},
+    storage::{
+        batch::Batch,
+        db::{Db, DbInner},
+        lock_context::LockContext,
+    },
 };
 
 pub struct RGuard<'a, T: BigObject> {
@@ -17,7 +21,7 @@ impl<'a, T: BigObject> RGuard<'a, T> {
     pub(super) fn new(db: &'a Db<T>) -> RGuard<'a, T> {
         let guard = db.inner.read();
         let context = LockContext::new(&guard);
-        let root = LockContext::get(&[]).unwrap();
+        let root = LockContext::get(&[], &()).unwrap();
         RGuard {
             _guard: guard,
             _context: context,
@@ -44,7 +48,7 @@ impl<'a, T: BigObject> WGuard<'a, T> {
     pub(super) fn new(db: &'a Db<T>) -> WGuard<'a, T> {
         let guard = db.inner.upgradable_read();
         let context = LockContext::new(&guard);
-        let root = LockContext::get::<T>(&[]).unwrap().big_clone();
+        let root = LockContext::get::<T, _>(&[], &()).unwrap().big_clone();
         WGuard {
             guard: Some(guard),
             _context: context,
@@ -72,10 +76,11 @@ impl<'a, T: BigObject> Drop for WGuard<'a, T> {
         if std::thread::panicking() {
             return;
         }
-        let mut batch = Batch::new();
+        let mut batch = Batch::default();
         let mut root = self.root.take().unwrap();
-        root.finalize(Vec::new, &mut batch);
-        batch.put(vec![], root);
+        let mut key = Vec::new();
+        root.finalize(|| &mut key, &mut batch);
+        batch.put(&[], &(), root);
         let db = RwLockUpgradableReadGuard::upgrade(self.guard.take().unwrap());
         batch.apply(&db);
     }

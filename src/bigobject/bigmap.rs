@@ -9,15 +9,18 @@ use std::{
 use serde::{de::DeserializeOwned, Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::{
-    bigobject::{BigObject, Key, KeyRef},
-    storage::{LockContext, PhantomContext},
+    bigobject::BigObject,
+    storage::{
+        batch::Batch,
+        lock_context::{LockContext, PhantomContext},
+    },
 };
 
-pub fn child<K: KeyRef>(prefix: &[u8], key: &K) -> Vec<u8> {
-    let mut child = prefix.to_vec();
-    storekey::serialize_into(&mut child, key).unwrap();
-    child
-}
+pub trait KeyRef: Serialize + Ord {}
+impl<T: Serialize + Ord + ?Sized> KeyRef for T {}
+
+pub trait Key: Serialize + DeserializeOwned + Ord + Clone + 'static {}
+impl<T: Serialize + DeserializeOwned + Ord + Clone + 'static> Key for T {}
 
 pub struct BigMap<K: Key, V: BigObject> {
     prefix: Option<Vec<u8>>,
@@ -57,23 +60,21 @@ where
     K: Key,
     V: BigObject,
 {
-    fn initialize<F: FnOnce() -> Vec<u8>>(&mut self, prefix: F) {
-        self.prefix = Some(prefix());
+    fn initialize<'a, F: FnOnce() -> &'a mut Vec<u8>>(&mut self, prefix: F) {
+        self.prefix = Some(prefix().clone());
     }
 
-    fn finalize<F: FnOnce() -> Vec<u8>>(&mut self, prefix: F, batch: &mut crate::storage::Batch) {
+    fn finalize<'a, F: FnOnce() -> &'a mut Vec<u8>>(&mut self, prefix: F, batch: &mut Batch) {
         let prefix = self.prefix.get_or_insert_with(|| {
-            let prefix = prefix();
-            batch.delete(prefix.big_clone());
+            let prefix = prefix().clone();
+            batch.delete_prefix(&prefix);
             prefix
         });
         for (key, value) in take(&mut self.changes).into_iter() {
-            if let Some(mut value) = value {
-                let child = child(prefix, &key);
-                value.finalize(|| child.big_clone(), batch);
-                batch.put(child, value);
+            if let Some(value) = value {
+                batch.put(prefix, &key, value);
             } else {
-                batch.delete(child(prefix, &key));
+                batch.delete(prefix, &key);
             }
         }
     }
@@ -121,7 +122,7 @@ impl<K: Key, V: BigObject> BigMap<K, V> {
             || {
                 self.prefix
                     .as_ref()
-                    .and_then(|prefix| LockContext::get(&child(prefix, &key)))
+                    .and_then(|prefix| LockContext::get(prefix, &key))
             },
             |value| value.as_ref(),
         )
@@ -136,7 +137,7 @@ impl<K: Key, V: BigObject> BigMap<K, V> {
                 key.to_owned(),
                 self.prefix
                     .as_ref()
-                    .and_then(|prefix| LockContext::get(&child(prefix, &key)).map(V::big_clone)),
+                    .and_then(|prefix| LockContext::get(prefix, &key).map(V::big_clone)),
             );
         }
         self.changes.get_mut(key).unwrap().as_mut()
