@@ -5,7 +5,7 @@ use elsa::FrozenVec;
 use crate::{
     bigobject::{bigmap::KeyRef, BigObject},
     db_key::{append_map_key, append_prefix_len},
-    storage::db::{CacheEntry, DbInner, SyncWrapper},
+    storage::db::{CacheEntry, DbInner, SyncWrapper, CACHE_ENTRY_OVERHEAD},
 };
 
 pub type PhantomContext = PhantomData<*const ()>;
@@ -71,12 +71,12 @@ impl LockContext {
                         let mut cache_key = cache_key.to_vec();
                         value.initialize(|| &mut cache_key);
                         CacheEntry {
-                            len: (cache_key.len() + encoded.len() + 24) as u32,
+                            len: (cache_key.len() + encoded.len() + CACHE_ENTRY_OVERHEAD) as u32,
                             value: Some(Arc::new(SyncWrapper(value))),
                         }
                     } else {
                         CacheEntry {
-                            len: (cache_key.len() + 24) as u32,
+                            len: (cache_key.len() + CACHE_ENTRY_OVERHEAD) as u32,
                             value: None,
                         }
                     }
