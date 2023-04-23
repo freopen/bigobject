@@ -1,5 +1,4 @@
 mod bigobject;
-mod db_key;
 mod storage;
 
 pub use crate::{
@@ -9,5 +8,5 @@ pub use crate::{
 pub use bigobject_derive::BigObject;
 
 pub mod internal {
-    pub use crate::{bigobject::BigObject, storage::batch::Batch};
+    pub use crate::{bigobject::BigObject, storage::batch::Batch, storage::prefix::Prefix};
 }

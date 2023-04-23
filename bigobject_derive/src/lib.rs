@@ -24,26 +24,26 @@ pub fn derive_big_object(input: proc_macro::TokenStream) -> proc_macro::TokenStr
     let field_index: Vec<u8> = (0..(field_num as u8)).collect();
     let expanded = quote! {
         impl #impl_generics bigobject::internal::BigObject for #name #ty_generics #where_clause {
-            fn initialize<'a, F: FnOnce() -> &'a mut Vec<u8>>(&mut self, prefix: F)
+            fn initialize<'a, F: FnOnce() -> &'a mut bigobject::internal::Prefix>(&mut self, prefix: F)
             {
                 let mut prefix = prefix();
-                prefix.push(0);
+                prefix.push_field_index();
                 #(self.#field_name.initialize(|| {
-                    *prefix.last_mut().unwrap() = #field_index;
+                    prefix.set_field_index(#field_index);
                     &mut prefix
                 });)*
-                prefix.pop();
+                prefix.pop_field_index();
             }
-            fn finalize<'a, F: FnOnce() -> &'a mut Vec<u8>>(
+            fn finalize<'a, F: FnOnce() -> &'a mut bigobject::internal::Prefix>(
                 &mut self, prefix: F, batch: &mut bigobject::internal::Batch
             ) {
                 let mut prefix = prefix();
-                prefix.push(0);
+                prefix.push_field_index();
                 #(self.#field_name.finalize(|| {
-                    *prefix.last_mut().unwrap() = #field_index;
+                    prefix.set_field_index(#field_index);
                     &mut prefix
                 }, batch);)*
-                prefix.pop();
+                prefix.pop_field_index();
             }
             fn big_clone(&self) -> Self {
                 Self {

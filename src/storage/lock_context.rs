@@ -4,8 +4,10 @@ use elsa::FrozenVec;
 
 use crate::{
     bigobject::{bigmap::KeyRef, BigObject},
-    db_key::{append_map_key, append_prefix_len},
-    storage::db::{CacheEntry, DbInner, SyncWrapper, CACHE_ENTRY_OVERHEAD},
+    storage::{
+        db::{CacheEntry, DbInner, SyncWrapper},
+        prefix::Prefix,
+    },
 };
 
 pub type PhantomContext = PhantomData<*const ()>;
@@ -53,30 +55,27 @@ impl LockContext {
         })
     }
 
-    pub fn get<T: BigObject, K: KeyRef>(prefix: &[u8], key: &K) -> Option<&'static T> {
+    pub fn get<T: BigObject, K: KeyRef>(prefix: &Prefix, key: &K) -> Option<&'static T> {
         LOCK_CONTEXT.with(|context| {
             let context = context.borrow_mut().unwrap();
-            let mut db_key = prefix.to_vec();
-            let prefix_len = prefix.len();
-            append_map_key(&mut db_key, key);
-            let cache_key_len = db_key.len();
-            append_prefix_len(&mut db_key, prefix_len);
-            let cache_key = &db_key[..cache_key_len];
+            let mut key_prefix = prefix.clone();
+            let prefix_len = key_prefix.append_map_key(key);
+            let db_key = key_prefix.into_leaf(prefix_len);
             context
                 .db
                 .cache
-                .get_with_by_ref(cache_key, || {
+                .get_with_by_ref(&db_key, || {
                     if let Some(encoded) = context.db.rocksdb.get_pinned(&db_key).unwrap() {
                         let mut value = rmp_serde::decode::from_slice::<T>(&encoded).unwrap();
-                        let mut cache_key = cache_key.to_vec();
-                        value.initialize(|| &mut cache_key);
+                        let mut key_prefix = Prefix::from_leaf(db_key.clone(), prefix_len);
+                        value.initialize(|| &mut key_prefix);
                         CacheEntry {
-                            len: (cache_key.len() + encoded.len() + CACHE_ENTRY_OVERHEAD) as u32,
+                            len: (key_prefix.len() + encoded.len()).try_into().unwrap(),
                             value: Some(Arc::new(SyncWrapper(value))),
                         }
                     } else {
                         CacheEntry {
-                            len: (cache_key.len() + CACHE_ENTRY_OVERHEAD) as u32,
+                            len: db_key.len().try_into().unwrap(),
                             value: None,
                         }
                     }

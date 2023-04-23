@@ -1,15 +1,15 @@
-use std::{any::Any, marker::PhantomData, path::Path, sync::Arc};
+use std::{any::Any, cell::RefCell, marker::PhantomData, path::Path, sync::Arc};
 
 use moka::sync::Cache;
 use parking_lot::RwLock;
 
 use crate::{
     bigobject::BigObject,
-    db_key::split_db_key,
-    storage::guard::{RGuard, WGuard},
+    storage::{
+        guard::{RGuard, WGuard},
+        prefix::Prefix,
+    },
 };
-
-pub(super) const CACHE_ENTRY_OVERHEAD: usize = 24;
 
 #[repr(transparent)]
 pub(super) struct SyncWrapper<T: BigObject>(pub(super) T);
@@ -29,6 +29,7 @@ pub(super) struct DbInner {
 
 pub struct Db<T: BigObject> {
     pub(super) inner: Arc<RwLock<DbInner>>,
+    pub(crate) root: RefCell<T>,
     _phantom: PhantomData<T>,
 }
 
@@ -44,14 +45,9 @@ fn db_opts() -> rocksdb::Options {
     opts.set_bottommost_compression_type(rocksdb::DBCompressionType::Zstd);
     opts.set_bottommost_compression_options(0, 5, 0, 16 * 1024, true);
     opts.set_bottommost_zstd_max_train_bytes(100 * 16 * 1024, true);
-    opts.set_comparator("BigObjectComparator", |a, b| {
-        let (a_prefix, a_key) = split_db_key(a);
-        let (b_prefix, b_key) = split_db_key(b);
-        a_prefix.cmp(b_prefix).then_with(|| a_key.cmp(b_key))
-    });
     opts.set_prefix_extractor(rocksdb::SliceTransform::create(
         "BigObjectPrefixExtractor",
-        |key| split_db_key(key).0,
+        Prefix::extract_prefix,
         None,
     ));
     opts.set_optimize_filters_for_hits(true);
@@ -73,11 +69,13 @@ fn db_opts() -> rocksdb::Options {
 impl<T: BigObject + Default> Db<T> {
     pub fn open<P: AsRef<Path>>(path: P) -> Self {
         let rocksdb = rocksdb::DB::open(&db_opts(), path).unwrap();
-        if rocksdb.get([0]).unwrap().is_none() {
-            rocksdb
-                .put([0], rmp_serde::to_vec(&T::default()).unwrap())
-                .unwrap();
-        }
+        let mut root = if let Some(encoded_root) = rocksdb.get([0]).unwrap() {
+            rmp_serde::from_slice(&encoded_root).unwrap()
+        } else {
+            T::default()
+        };
+        let mut prefix = Prefix::new();
+        root.initialize(|| &mut prefix);
         let cache = Cache::builder()
             .max_capacity(128 * 1024 * 1024)
             .weigher(|_key, value: &CacheEntry| value.len)
@@ -85,6 +83,7 @@ impl<T: BigObject + Default> Db<T> {
             .build();
         Db {
             inner: Arc::new(RwLock::new(DbInner { rocksdb, cache })),
+            root: RefCell::new(root),
             _phantom: PhantomData,
         }
     }

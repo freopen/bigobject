@@ -13,6 +13,7 @@ use crate::{
     storage::{
         batch::Batch,
         lock_context::{LockContext, PhantomContext},
+        prefix::Prefix,
     },
 };
 
@@ -23,7 +24,7 @@ pub trait Key: Serialize + DeserializeOwned + Ord + Clone + 'static {}
 impl<T: Serialize + DeserializeOwned + Ord + Clone + 'static> Key for T {}
 
 pub struct BigMap<K: Key, V: BigObject> {
-    prefix: Option<Vec<u8>>,
+    prefix: Option<Prefix>,
     changes: BTreeMap<K, Option<V>>,
     _phantom: PhantomContext,
 }
@@ -60,11 +61,11 @@ where
     K: Key,
     V: BigObject,
 {
-    fn initialize<'a, F: FnOnce() -> &'a mut Vec<u8>>(&mut self, prefix: F) {
+    fn initialize<'a, F: FnOnce() -> &'a mut Prefix>(&mut self, prefix: F) {
         self.prefix = Some(prefix().clone());
     }
 
-    fn finalize<'a, F: FnOnce() -> &'a mut Vec<u8>>(&mut self, prefix: F, batch: &mut Batch) {
+    fn finalize<'a, F: FnOnce() -> &'a mut Prefix>(&mut self, prefix: F, batch: &mut Batch) {
         let prefix = self.prefix.get_or_insert_with(|| {
             let prefix = prefix().clone();
             batch.delete_prefix(&prefix);
@@ -81,7 +82,7 @@ where
     fn big_clone(&self) -> Self {
         assert!(self.changes.is_empty());
         Self {
-            prefix: self.prefix.big_clone(),
+            prefix: self.prefix.as_ref().map(|prefix| prefix.clone()),
             changes: BTreeMap::new(),
             _phantom: Default::default(),
         }
